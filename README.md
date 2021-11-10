@@ -2,9 +2,9 @@
 
 ![usecase_of_cam2mqtt](_photo/cam2mqtt.png)
 
-원본 프로젝트는 suapapa님의 [esp32_cam2mqtt](https://github.com/suapapa/esp32_cam2mqtt){:target="_blank"}입니다.
+원본 프로젝트는 suapapa님의 [esp32_cam2mqtt](https://github.com/suapapa/esp32_cam2mqtt)입니다.
 
-* HomeAssistant의 [MQTT Camera](https://www.home-assistant.io/integrations/camera.mqtt/){:target="_blank"}를 이용하여 결과를 확인할 수 있습니다.
+* HomeAssistant의 [MQTT Camera](https://www.home-assistant.io/integrations/camera.mqtt/)를 이용하여 결과를 확인할 수 있습니다.
 * [esp-idf](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/#)를 사용하여 빌드합니다.
 * 하루에 한장의 사진을 찍도록 되어 있습니다.
 * 날짜와 시간이 사진에 함께 출력됩니다. [sample](_photo/sample.png).
@@ -36,7 +36,8 @@ $ idf.py menuconfig
 다음 내용을 설정합니다.
 - Wifi Configuration: SSID 및 패스워드 설정
 - MQTT Configuration: MQTT 서버 주소 설정
-- Component Config > ESP32-specific > Support for external, SPI-connected RAM 체크
+- Component config > ESP32-specific > Support for external, SPI-connected RAM 체크
+- Serial flasher config > Flash size > 4MB 선택 (하드웨어에 따라 다를 수 있습니다.)
 
 아래 명령어로 빌드할 수 있습니다.
 

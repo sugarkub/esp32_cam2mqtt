@@ -57,18 +57,18 @@ wifi_event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     }
-	else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         if (s_retry_num < WIFI_MAX_RETRY) {
             esp_wifi_connect();
             s_retry_num++;
             ESP_LOGI(TAG, "retry to connect to the AP");
         }
-		else {
+        else {
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
         ESP_LOGI(TAG, "connect to the AP fail");
     }
-	else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *) event_data;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
@@ -76,7 +76,7 @@ wifi_event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 
-void wifi_init_sta(void)
+bool wifi_init_sta(void)
 {
     s_wifi_event_group = xEventGroupCreate();
 
@@ -132,13 +132,15 @@ void wifi_init_sta(void)
 
     /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
      * happened. */
+    bool result = false;
     if (bits & WIFI_CONNECTED_BIT) {
         ESP_LOGI(TAG, "connected to ap SSID:%s password:%s", WIFI_SSID, WIFI_PASS);
+        result = true;
     }
-	else if (bits & WIFI_FAIL_BIT) {
+    else if (bits & WIFI_FAIL_BIT) {
         ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s", WIFI_SSID, WIFI_PASS);
     }
-	else {
+    else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
 
@@ -146,9 +148,11 @@ void wifi_init_sta(void)
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, instance_got_ip));
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, instance_any_id));
     vEventGroupDelete(s_wifi_event_group);
+
+    return result;
 }
 
-void init_wifi(void)
+bool init_wifi(void)
 {
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
@@ -159,7 +163,7 @@ void init_wifi(void)
     ESP_ERROR_CHECK(ret);
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
-    wifi_init_sta();
+    return wifi_init_sta();
 }
 
 /* ---- */
@@ -246,10 +250,11 @@ static esp_err_t init_camera()
         return err;
     }
 
+    // sensor_t *s = esp_camera_sensor_get();
+    // s->set_exposure_ctrl(s, 1);
+
     return ESP_OK;
 }
-
-/* ---- */
 
 void init_gpio()
 {
@@ -260,8 +265,6 @@ void init_gpio()
     // gpio_set_direction(FLASHLIGHT_GPIO, GPIO_MODE_OUTPUT);
     // gpio_set_level(FLASHLIGHT_GPIO, 0);  // off
 }
-
-/* ---- */
 
 void time_sync_notification_cb(struct timeval *tv)
 {
@@ -296,7 +299,20 @@ static void sync_time(void)
     // localtime_r(&now, &timeinfo);
 }
 
-/* ---- */
+struct tm get_current_time(void)
+{
+    setenv("TZ", "UTC-9", 1);    // means UTC+9
+    tzset();
+
+    sync_time();
+
+    time_t now;
+    struct tm timeinfo;
+    time(&now);
+    localtime_r(&now, &timeinfo);
+
+    return timeinfo;
+}
 
 void draw_info_string(uint8_t * fb_buf, const char *str)
 {
@@ -312,36 +328,8 @@ void draw_info_string(uint8_t * fb_buf, const char *str)
     draw_string(fb_buf, cam_w, cam_h, 8, 8, str, FONTCOLOR_WHITE);
 }
 
-/* ---- */
-
-void app_main(void)
+size_t capture_frame(uint8_t** buf, struct tm timeinfo)
 {
-    bool is_wifi_connected = false;
-
-    init_gpio();
-    gpio_set_level(BLINK_GPIO, 0);
-
-	if (countdown > 0) {
-		countdown -= 1;
-		goto deepsleep;
-	}
-
-	ESP_LOGI(TAG, "Connecting to WiFi and getting time over NTP.");
-	init_wifi();
-	is_wifi_connected = true;
-
-	setenv("TZ", "UTC-9", 1);    // means UTC+9
-    tzset();
-
-	sync_time();
-
-	time_t now;
-    struct tm timeinfo;
-	time(&now);
-	localtime_r(&now, &timeinfo);
-
-	countdown = 23 - timeinfo.tm_hour + 12;
-
     char strftime_buf[32];
     strftime(strftime_buf, sizeof(strftime_buf), "%Y-%m-%d(%a) %T", &timeinfo);
     ESP_LOGI(TAG, "The current date/time is: %s", strftime_buf);
@@ -352,41 +340,74 @@ void app_main(void)
     vTaskDelay(5000 / portTICK_PERIOD_MS);
 
     camera_fb_t *fb;
+    for (int i = 0; i < 10; ++i) {
+        fb = esp_camera_fb_get();
+        esp_camera_fb_return(fb);
+        vTaskDelay(30 / portTICK_PERIOD_MS);
+    }
     fb = esp_camera_fb_get();
 
+    short nextcd = 23 - timeinfo.tm_hour + 16;
     char strinfo_buf[64];
-    sprintf(strinfo_buf, "%s cnt: %03d", strftime_buf, ++seq_num);
+    sprintf(strinfo_buf, "%s seq: %03d cd: %02d", strftime_buf, ++seq_num, nextcd);
     draw_info_string(fb->buf, strinfo_buf);
 
-    uint8_t *buf = NULL;
     size_t buf_len = 0;
-    bool converted = frame2jpg(fb, 80, &buf, &buf_len);
+    bool converted = frame2jpg(fb, 80, buf, &buf_len);
     esp_camera_fb_return(fb);
     esp_camera_deinit();
 
-	if (!converted) {
-        goto deepsleep;
-	}
+    if (!converted) {
+        buf_len = 0;
+    }
 
-    if (!is_wifi_connected) {
-        init_wifi();
-        is_wifi_connected = true;
+    return buf_len;
+}
+
+void app_main(void)
+{
+    bool is_wifi_connected = false;
+
+    init_gpio();
+    gpio_set_level(BLINK_GPIO, 0);
+
+    ESP_LOGI(TAG, "Initialized with countdown %d", countdown);
+    if (countdown > 0) {
+        countdown -= 1;
+        goto deepsleep;
+    }
+
+    ESP_LOGI(TAG, "Connecting to WiFi and getting time over NTP.");
+    is_wifi_connected = init_wifi();
+    if (is_wifi_connected == false) {
+        goto deepsleep;
+    }
+
+    struct tm timeinfo = get_current_time();
+
+    ESP_LOGI(TAG, "Taking picture...");
+    uint8_t *buf = NULL;
+    size_t buf_len = capture_frame(&buf, timeinfo);
+
+    if (buf_len == 0) {
+        goto deepsleep;
     }
 
     init_mqtt();
     ESP_LOGI(TAG, "Sending it to MQTT topic %s ...", MQTT_TOPIC);
     esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC, (const char *)(buf), buf_len, 0, 0);
 
+    countdown = 23 - timeinfo.tm_hour + 16;
+
  deepsleep:
-    // TODO: need free buf?
     gpio_set_level(BLINK_GPIO, 1);
 
     esp_mqtt_client_destroy(mqtt_client);
     if (is_wifi_connected) {
         esp_wifi_stop();
-	}
+    }
 
-    const int deep_sleep_sec = 1 * 60 * 60;
-    ESP_LOGI(TAG, "Entering deep sleep for %d seconds, cnt: %d", deep_sleep_sec, countdown);
-    esp_deep_sleep(1000000LL * deep_sleep_sec);
+    const uint32_t deep_sleep_sec = 1 * 60 * 60;
+    ESP_LOGI(TAG, "Entering deep sleep for %d seconds, countdown: %d", deep_sleep_sec, countdown);
+    esp_deep_sleep(1000000ULL * deep_sleep_sec);
 }

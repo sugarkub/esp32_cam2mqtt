@@ -328,10 +328,15 @@ void draw_info_string(uint8_t * fb_buf, const char *str)
     draw_string(fb_buf, cam_w, cam_h, 8, 8, str, FONTCOLOR_WHITE);
 }
 
+int next_countdown(int current_hour)
+{
+    return 23 - current_hour + 8;
+}
+
 size_t capture_frame(uint8_t** buf, struct tm timeinfo)
 {
     char strftime_buf[32];
-    strftime(strftime_buf, sizeof(strftime_buf), "%Y-%m-%d(%a) %T", &timeinfo);
+    strftime(strftime_buf, sizeof(strftime_buf), "%Y/%m/%d(%a) %T", &timeinfo);
     ESP_LOGI(TAG, "The current date/time is: %s", strftime_buf);
 
     // gpio_set_level(FLASHLIGHT_GPIO, 1);  // on
@@ -340,15 +345,15 @@ size_t capture_frame(uint8_t** buf, struct tm timeinfo)
     vTaskDelay(5000 / portTICK_PERIOD_MS);
 
     camera_fb_t *fb;
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 5; ++i) {
         fb = esp_camera_fb_get();
         esp_camera_fb_return(fb);
         vTaskDelay(30 / portTICK_PERIOD_MS);
     }
     fb = esp_camera_fb_get();
 
-    short nextcd = 23 - timeinfo.tm_hour + 16;
-    char strinfo_buf[64];
+    int nextcd = next_countdown(timeinfo.tm_hour);
+    char strinfo_buf[92];
     sprintf(strinfo_buf, "%s seq: %03d cd: %02d", strftime_buf, ++seq_num, nextcd);
     draw_info_string(fb->buf, strinfo_buf);
 
@@ -371,7 +376,7 @@ void app_main(void)
     init_gpio();
     gpio_set_level(BLINK_GPIO, 0);
 
-    ESP_LOGI(TAG, "Initialized with countdown %d", countdown);
+    //ESP_LOGI(TAG, "Initialized with countdown %d", countdown);
     if (countdown > 0) {
         countdown -= 1;
         goto deepsleep;
@@ -397,7 +402,7 @@ void app_main(void)
     ESP_LOGI(TAG, "Sending it to MQTT topic %s ...", MQTT_TOPIC);
     esp_mqtt_client_publish(mqtt_client, MQTT_TOPIC, (const char *)(buf), buf_len, 0, 0);
 
-    countdown = 23 - timeinfo.tm_hour + 16;
+    countdown = next_countdown(timeinfo.tm_hour);
 
  deepsleep:
     gpio_set_level(BLINK_GPIO, 1);
@@ -405,6 +410,7 @@ void app_main(void)
     esp_mqtt_client_destroy(mqtt_client);
     if (is_wifi_connected) {
         esp_wifi_stop();
+        is_wifi_connected = false;
     }
 
     const uint32_t deep_sleep_sec = 1 * 60 * 60;

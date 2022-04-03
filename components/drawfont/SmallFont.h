@@ -3,14 +3,6 @@
 // Font size    : 8x12 pixels
 // Memory usage : 1144 bytes
 
-typedef struct  {
-	uint8_t w;
-	uint8_t h;
-	uint8_t offset;
-	uint8_t cnt;
-	unsigned char *font;
-} Font;
-
 unsigned char tft_SmallFont[1144] =
 {
 0x08,0x0C,0x20,0x5F,

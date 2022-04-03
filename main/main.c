@@ -47,7 +47,6 @@ static const char *TAG = "cam2mqtt";
 
 static int s_retry_num = 0;
 
-RTC_DATA_ATTR static int seq_num = 0;
 RTC_DATA_ATTR static int countdown = 0;
 
 static void
@@ -289,7 +288,7 @@ static void sync_time(void)
     // struct tm timeinfo = { 0 };
     int retry = 0;
     const int retry_count = 20;
-    while (sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET && ++retry < retry_count) {
+    while ((sntp_get_sync_status() == SNTP_SYNC_STATUS_RESET) && (++retry < retry_count)) {
         ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
         vTaskDelay(2000 / portTICK_PERIOD_MS);
     }
@@ -314,20 +313,6 @@ struct tm get_current_time(void)
     return timeinfo;
 }
 
-void draw_info_string(uint8_t * fb_buf, const char *str)
-{
-    // VGA
-    int cam_w = 640;
-    int cam_h = 480;
-
-    set_defaultfont();
-    draw_string(fb_buf, cam_w, cam_h, 8 - 1, 8, str, FONTCOLOR_BLACK);
-    draw_string(fb_buf, cam_w, cam_h, 8 + 1, 8, str, FONTCOLOR_BLACK);
-    draw_string(fb_buf, cam_w, cam_h, 8, 8 - 1, str, FONTCOLOR_BLACK);
-    draw_string(fb_buf, cam_w, cam_h, 8, 8 + 1, str, FONTCOLOR_BLACK);
-    draw_string(fb_buf, cam_w, cam_h, 8, 8, str, FONTCOLOR_WHITE);
-}
-
 int next_countdown(int current_hour)
 {
     return 23 - current_hour + 8;
@@ -335,7 +320,7 @@ int next_countdown(int current_hour)
 
 size_t capture_frame(uint8_t** buf, struct tm timeinfo)
 {
-    char strftime_buf[32];
+    char strftime_buf[64];
     strftime(strftime_buf, sizeof(strftime_buf), "%Y/%m/%d(%a) %T", &timeinfo);
     ESP_LOGI(TAG, "The current date/time is: %s", strftime_buf);
 
@@ -352,10 +337,8 @@ size_t capture_frame(uint8_t** buf, struct tm timeinfo)
     }
     fb = esp_camera_fb_get();
 
-    int nextcd = next_countdown(timeinfo.tm_hour);
-    char strinfo_buf[92];
-    sprintf(strinfo_buf, "%s seq: %03d cd: %02d", strftime_buf, ++seq_num, nextcd);
-    draw_info_string(fb->buf, strinfo_buf);
+    init_font();
+    draw_string_with_border(fb->buf, 640, 480, 12, 16, strftime_buf, 2);
 
     size_t buf_len = 0;
     bool converted = frame2jpg(fb, 80, buf, &buf_len);
